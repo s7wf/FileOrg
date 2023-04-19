@@ -8,30 +8,12 @@ from PyQt5.QtGui import QStandardItemModel, QStandardItem
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QPushButton, QWidget, QMessageBox,
                              QProgressBar, QTreeView, QPlainTextEdit, QAbstractItemView)
 from transformers import AutoModelForSequenceClassification
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import DistilBertTokenizer, DistilBertForSequenceClassification
 
 from custom_text_classification import CustomTextClassificationPipeline
 
 sys.setrecursionlimit(10000)
-
-if os.name == 'nt' and sys.getwindowsversion()[0] >= 6:
-    # Set the manifest to request elevated permissions
-    try:
-        import ctypes
-        ctypes.windll.kernel32.SetDllDirectoryW(None)
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("myappid")
-        myappid = 'mycompany.myproduct.subproduct.version' # arbitrary string
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-        exe = sys.executable
-        if hasattr(sys, '_MEIPASS'):
-            exe = os.path.join(sys._MEIPASS, os.path.basename(sys.executable))
-        # Change the filename to your application's main executable file
-        ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, None, None, 1)
-        sys.exit(0)
-    except:
-        pass
-
 
 class MainWindow(QMainWindow):
 
