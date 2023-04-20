@@ -7,11 +7,10 @@ import torch
 from PyQt5.QtGui import QStandardItemModel, QStandardItem
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QPushButton, QWidget, QMessageBox,
                              QProgressBar, QTreeView, QPlainTextEdit, QAbstractItemView)
-from transformers import AutoModelForSequenceClassification
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers import DistilBertTokenizer, DistilBertForSequenceClassification
-
-from custom_text_classification import CustomTextClassificationPipeline
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torchvision
+import torchvision.transforms as transforms
+from PIL import Image
 
 sys.setrecursionlimit(10000)
 
@@ -24,45 +23,35 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
 
         # Load the model and tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased-finetuned-sst-2-english")
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            "distilbert-base-uncased-finetuned-sst-2-english")
-
-        model_name = "distilbert-base-uncased"
-        self.tokenizer = DistilBertTokenizer.from_pretrained(model_name)
-        model = DistilBertForSequenceClassification.from_pretrained(model_name)
-        device = torch.cuda.current_device() if torch.cuda.is_available() else -1
-        self.classifier = CustomTextClassificationPipeline(
-            model=model,
-            tokenizer=self.tokenizer,
-            device=device,
-            framework="pt"
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased", max_length=128)
+        self.model = AutoModelForSequenceClassification.from_pretrained("distilbert-base-uncased")
         self.scan_button = QPushButton("Scan Files")
         self.scan_button.clicked.connect(self.on_scan_files_button_clicked)
         layout.addWidget(self.scan_button)
-
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
-
         self.tree_view = QTreeView()
         self.model = QStandardItemModel()
         self.tree_view.setModel(self.model)
         self.tree_view.setHeaderHidden(False)
         self.tree_view.setSelectionBehavior(QAbstractItemView.SelectRows)
         layout.addWidget(self.tree_view)
-
         self.output_box = QPlainTextEdit()
         self.output_box.setReadOnly(True)
         layout.addWidget(self.output_box)
-
         central_widget = QWidget()
         central_widget.setLayout(layout)
         self.setCentralWidget(central_widget)
-
         self.statusBar = self.statusBar()
+        # For text classification
+        self.text_tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased", max_length=128)
+        self.text_model = AutoModelForSequenceClassification.from_pretrained("distilbert-base-uncased")
+
+        # For image object detection
+        self.image_model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
+        self.image_model.eval()
 
     def get_image_metadata(self, image_path):
         with open(image_path, 'rb') as f:
@@ -76,23 +65,35 @@ class MainWindow(QMainWindow):
                 files.append(os.path.join(root, file_name))
         return files
 
+    def detect_objects(self, image_path):
+        image = Image.open(image_path).convert('RGB')
+        transform = transforms.Compose([transforms.ToTensor()])
+        image = transform(image)
+        with torch.no_grad():
+            predictions = self.image_model([image])
+        objects = []
+        for pred in predictions[0]['labels']:
+            label = self.image_model.classes[pred]
+            objects.append(label)
+        return objects
+
+    def classify_text(self, file_path):
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
+            content = file.read()
+        inputs = self.text_tokenizer(content, return_tensors="pt", truncation=True, padding=True)
+        outputs = self.text_model(**inputs)
+        label_index = torch.argmax(outputs.logits, dim=1).item()
+        label = self.text_tokenizer.convert_ids_to_tokens([label_index])[0]
+        return [label]
+
     def generate_tags(self, file_path):
         tags = []
-
-        with open(file_path, 'r', encoding='utf-8') as file:
-            content = file.readlines()
-        stripped_content = [line.strip() for line in content]
-
-        print(f"Content: {stripped_content}")  # Add this line for debugging purposes
-
-        results = self.classifier(stripped_content)
-
-        # Extract the labels with a threshold confidence score
-        threshold = 0.5
-        for result in results:
-            if result['score'] > threshold:
-                tags.append(result['label'])
-
+        if file_path.endswith(('.jpg', '.jpeg', '.png', '.bmp')):
+            objects = self.detect_objects(file_path)
+            tags.extend(objects)
+        elif file_path.endswith(('.txt', '.md', '.pdf', '.docx')):
+            label = self.classify_text(file_path)
+            tags.extend(label)
         return tags
 
     def scan_and_tag_files(self):
